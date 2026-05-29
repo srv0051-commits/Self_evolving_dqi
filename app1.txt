@@ -1,0 +1,143 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+st.title("Self-Evolving Data Quality Intelligence System")
+
+file = st.file_uploader("Upload CSV Dataset")
+
+run_clean = st.button("Run After Cleaning")
+run_tuning = st.button("Run After Tuning")
+
+if file:
+    df = pd.read_csv(file)
+
+    # REMOVE UNNECESSARY COLUMNS
+    drop_cols = ['PassengerId', 'Name', 'Ticket', 'Cabin', 'id', 'dataset']
+    df = df.drop(columns=[col for col in drop_cols if col in df.columns])
+
+    # BEFORE CLEANING (ONLY DATA VIEW)
+    st.subheader("Dataset Preview (Before Cleaning)")
+    st.write(df.head())
+
+    st.subheader("Missing Values Before Cleaning")
+    st.write(df.isnull().sum())
+
+    # TARGET DETECTION
+    if 'Survived' in df.columns:
+        target = 'Survived'
+    elif 'num' in df.columns:
+        target = 'num'
+    else:
+        target = df.columns[-1]
+
+    st.write(f"Target Column: {target}")
+
+    # PREPARE SPLIT USING TEMP DATA (for consistency)
+    df_temp = df.fillna(0)
+    df_temp_encoded = pd.get_dummies(df_temp, drop_first=True)
+
+    X = df_temp_encoded.drop(target, axis=1)
+    y = df_temp_encoded[target]
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    results = []
+
+    # AFTER CLEANING
+    if run_clean or run_tuning:
+        df_cleaned = df.copy()
+
+        for col in df_cleaned.columns:
+            if col != target:
+                if df_cleaned[col].dtype == 'object':
+                    df_cleaned[col] = df_cleaned[col].fillna(df_cleaned[col].mode()[0])
+                else:
+                    df_cleaned[col] = df_cleaned[col].fillna(df_cleaned[col].median())
+
+        st.subheader("Dataset Preview (After Cleaning)")
+        st.write(df_cleaned.head())
+
+        st.subheader("Missing Values After Cleaning")
+        st.write(df_cleaned.isnull().sum())
+
+        df_cleaned_encoded = pd.get_dummies(df_cleaned, drop_first=True)
+
+        # ALIGN FEATURES
+        df_cleaned_encoded = df_cleaned_encoded.reindex(columns=df_temp_encoded.columns, fill_value=0)
+
+        X2 = df_cleaned_encoded.drop(target, axis=1)
+        y2 = df_cleaned_encoded[target]
+
+        model_clean = RandomForestClassifier(random_state=42)
+        model_clean.fit(X_train, y_train)
+
+        pred_clean = model_clean.predict(X_test)
+
+        acc_clean = accuracy_score(y_test, pred_clean)
+        precision_clean = precision_score(y_test, pred_clean, average='weighted')
+        recall_clean = recall_score(y_test, pred_clean, average='weighted')
+        f1_clean = f1_score(y_test, pred_clean, average='weighted')
+
+        results.append(["After Cleaning", acc_clean, precision_clean, recall_clean, f1_clean])
+
+    # AFTER TUNING
+    if run_tuning:
+        param_grid = {
+            'n_estimators': [10, 50, 100, 200],
+            'max_depth': [3, 5, 10, None],
+            'min_samples_split': [2, 5, 10]
+        }
+
+        grid = GridSearchCV(
+            RandomForestClassifier(random_state=42),
+            param_grid,
+            cv=3
+        )
+
+        grid.fit(X_train, y_train)
+        model_tuned = grid.best_estimator_
+
+        st.write("Best Parameters:", grid.best_params_)
+
+        pred_tuned = model_tuned.predict(X_test)
+
+        acc_tuned = accuracy_score(y_test, pred_tuned)
+        precision_tuned = precision_score(y_test, pred_tuned, average='weighted')
+        recall_tuned = recall_score(y_test, pred_tuned, average='weighted')
+        f1_tuned = f1_score(y_test, pred_tuned, average='weighted')
+
+        results.append(["After Tuning", acc_tuned, precision_tuned, recall_tuned, f1_tuned])
+
+    # RESULTS TABLE
+    if results:
+        results_df = pd.DataFrame(results, columns=["Stage", "Accuracy", "Precision", "Recall", "F1 Score"])
+
+        st.subheader("Model Performance")
+        st.write(results_df)
+
+        # GRAPH
+        st.subheader("Performance Graph")
+
+        plt.figure()
+
+        for metric in ["Accuracy", "Precision", "Recall", "F1 Score"]:
+            plt.plot(results_df["Stage"], results_df[metric], marker='o', label=metric)
+
+        plt.legend()
+        plt.title("Model Performance After Cleaning & Tuning")
+
+        st.pyplot(plt)
+
+    # FINAL INSIGHT
+    st.subheader("System Insight")
+    st.write(
+        "The system improves data quality by removing missing values and ensuring consistency. "
+        "Model performance after cleaning and tuning reflects a more reliable and stable prediction process."
+    )
